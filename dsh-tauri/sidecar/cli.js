@@ -1109,6 +1109,23 @@ async function main() {
         } catch {}
         let ids = [];
         try { ids = c.mods.profilePatchHeal.parseFailedLoaderIds(tail) || []; } catch {}
+        // dsh-desktop patch: safe-overlay misdisable guard v1 — the single-tail-match
+        // disable was too eager (a transient AV-lock failure permanently disabled
+        // tool-cordis on 09-08). Two hardening rules:
+        //   1) never auto-disable kernel core packages (@deepseek-ai/*): core absence
+        //      is install corruption; auto-disabling core only makes the tree worse;
+        //   2) require two consecutive boot hits before a NEW disable: hits tracked
+        //      in <ud>/safe-boot.candidates.json; ids absent from this boot's tail
+        //      are cleared (recovered before ever being disabled). Ids already
+        //      present in the overlay stay (stable idempotent behavior).
+        ids = ids.filter((id) => typeof id === 'string' && id && !id.startsWith('@deepseek-ai/'));
+        const candFile = path.join(ud, 'safe-boot.candidates.json');
+        let cands = {};
+        try { cands = JSON.parse(fs.readFileSync(candFile, 'utf8')) || {}; } catch {}
+        if (typeof cands !== 'object' || Array.isArray(cands)) cands = {};
+        for (const k of Object.keys(cands)) { if (!ids.includes(k)) delete cands[k]; }
+        for (const id of ids) cands[id] = (Number(cands[id]) || 0) + 1;
+        try { c.mods.patchIo.writeFileAtomic(candFile, JSON.stringify(cands, null, 2) + '\n'); } catch {}
         const file = path.join(ud, 'safe-boot.overlay.yml');
         const existing = new Set();
         let existingText = '';
@@ -1118,13 +1135,14 @@ async function main() {
         // 下次内核启动仍解析失败进崩溃环）。
         const healedExisting = c.mods.patchSurgery.quotePatchScalarValues(existingText);
         let writeNeeded = healedExisting.changed;
-        const merged = [...new Set([...existing, ...ids])];
         // 现有条目提取：先按引号形态再按裸形态（脏文件两者都可能）。
         const re = /(?:^|\n)\s*-\s*id:\s*['"]?([^'"\n]+)['"]?\s*(?:\n|$)/g;
         let m; while ((m = re.exec(healedExisting.text)) !== null) {
           if (m[1] && m[1].trim()) existing.add(m[1].trim());
         }
-        const mergedFinal = [...new Set([...existing, ...ids])];
+        // 新禁用须连续两次 boot 命中（misdisable guard v1）；已禁用的保持。
+        const confirmed = ids.filter((id) => !existing.has(id) && (Number(cands[id]) || 0) >= 2);
+        const mergedFinal = [...new Set([...existing, ...confirmed])];
         if (mergedFinal.length === 0) {
           // V17：no-failures 早退但既有脏文件需修复时也必须原子写（开发原则 6
           // 设置类文件走原子写；防 HMR/内核装配撕裂读半写文件）。
