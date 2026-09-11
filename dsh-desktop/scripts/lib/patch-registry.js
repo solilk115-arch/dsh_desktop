@@ -188,6 +188,11 @@ const {
   transformFailLoudIsolation,
 } = require('./loader-isolation');
 
+// M1 治本（重锚版）：Session 事件窗口有界保留（v5，0.1.2-alpha.5 字节）。
+// 旧 session-event-bound 在 alpha.5 上游重写后休眠（patch-adapters 内标注），
+// 本 spec 接棒：MutableSessionEventSource append/prepend 裁窗 + replace 发布。
+const { transformSessionEventBoundV5 } = require('./session-event-bound-v5');
+
 /** 通用「已应用」日志主体（多数运行时补丁沿用）。 */
 const alreadySkip = (file) => '已应用，跳过 ' + file;
 
@@ -277,6 +282,33 @@ const PATCH_SPECS = [
       prefix: 'runtime 补丁',
       alreadyLog: alreadySkip,
       doneLog: (file) => '已修复会话列表刷新闪跳 ' + file,
+      failLog: (file, err) => 'runtime 补丁失败(' + file + '): ' + err.message,
+    },
+  },
+
+  // -------------------------------------------------------------------------
+  // M1 治本（重锚版）：Session 事件窗口有界保留（v5）。流式长会话的渲染进程
+  // 内存无界增长（WebView2 OOM 白屏）的代码级根治；旧 v4 补丁在 alpha.5 上游
+  // 重写后休眠，本 spec 按 MutableSessionEventSource 新字节重锚。同靶文件
+  // FLASH_PKG_REL（Session 客户端入口），失配自动跳过（anchor-missing）。
+  // -------------------------------------------------------------------------
+  {
+    id: 'session-event-bound-v5',
+    group: 'runtime',
+    order: 45,
+    kind: 'file',
+    layout: 'runtime-local',
+    wslLayout: 'wsl',
+    pkgRel: FLASH_PKG_REL,
+    transform: transformSessionEventBoundV5,
+    marker: null,
+    requires: [],
+    failPolicy: 'warn',
+    cli: true,
+    logs: {
+      prefix: 'runtime 补丁',
+      alreadyLog: alreadySkip,
+      doneLog: (file) => '已注入 Session 事件窗口有界保留(v5) ' + file,
       failLog: (file, err) => 'runtime 补丁失败(' + file + '): ' + err.message,
     },
   },
