@@ -195,22 +195,53 @@ function transformPersistenceTornTail(src, file) {
 // 时跳过该会话并告警，而不是让整个 plugin tree 初始化崩溃（2026-08 事故：
 // 卷影恢复带回零填充头部的会话日志，导致应用整体无法启动）。
 const PERSISTENCE_CORRUPT_MARKER = 'dsh-desktop-corrupt-guard-v1';
+/** v2：同一损坏文件每轮扫描重复告警的每进程去重（防日志洪泛冲掉崩溃现场）。 */
+const PERSISTENCE_CORRUPT_DEDUPE_MARKER = 'dsh-desktop-corrupt-guard-v2';
 const PERSISTENCE_CORRUPT_OLD =
   'const first = this.compression === "zstd" ? await this.readFirstZstdLine(path, signal) : await this.readFirstLine(path, signal);';
-const PERSISTENCE_CORRUPT_NEW = [
+// 告警语句本体（不含缩进）。v1 体与 v2 去重块共用这一份字面量，保证
+// 「在野 v1 副本就地升级」与「pristine 全新应用」两条路径产出逐字节相同
+//（unit-session-load-graceful 的升级收敛断言钉的就是这一条）。
+const PERSISTENCE_CORRUPT_WARN = 'console.warn(`[dsh-session-persistence] skipping corrupt session log: ${path} (${corruptError?.message ?? corruptError})`);';
+/** v1 形态的裸告警行（5 tab）：升级锚点，也是 v1 形态逆运算的定位串。 */
+const PERSISTENCE_CORRUPT_WARN_V1 = '\t\t\t\t\t' + PERSISTENCE_CORRUPT_WARN;
+/** v2 catch 体内的去重块。 */
+const PERSISTENCE_CORRUPT_DEDUPE_BLOCK = [
+  '\t\t\t\t// ' + PERSISTENCE_CORRUPT_DEDUPE_MARKER + ': list()/listArtifacts() 每 ~3s 重扫会对同一损坏文件重复告警，',
+  '\t\t\t\t// 实测占 dsh-web.log.old 98.4% 行并每小时轮掉 desktop.log（毁崩溃现场）——每进程每路径只告警一次。',
+  '\t\t\t\tif (!globalThis.__dshCorruptWarnSeen) globalThis.__dshCorruptWarnSeen = new Set();',
+  '\t\t\t\tif (!globalThis.__dshCorruptWarnSeen.has(path)) {',
+  '\t\t\t\t\tglobalThis.__dshCorruptWarnSeen.add(path);',
+  '\t\t\t\t\t' + PERSISTENCE_CORRUPT_WARN,
+  '\t\t\t\t}',
+].join('\n');
+/** v1 注入体（在野形态）：逆运算登记与升级判定共用。 */
+const PERSISTENCE_CORRUPT_V1 = [
   'let first;',
   '\t\t\t\ttry {',
   '\t\t\t\t\t// ' + PERSISTENCE_CORRUPT_MARKER + ': 损坏会话日志告警跳过，不得击穿启动扫描。',
   '\t\t\t\t\tfirst = this.compression === "zstd" ? await this.readFirstZstdLine(path, signal) : await this.readFirstLine(path, signal);',
   '\t\t\t\t} catch (corruptError) {',
   '\t\t\t\t\tsignal?.throwIfAborted();',
-  '\t\t\t\t\tconsole.warn(`[dsh-session-persistence] skipping corrupt session log: ${path} (${corruptError?.message ?? corruptError})`);',
+  PERSISTENCE_CORRUPT_WARN_V1,
   '\t\t\t\t\tcontinue;',
   '\t\t\t\t}',
 ].join('\n');
+/** v2 注入体 = v1 体内联去重块（同一份字面量拼出，杜绝两条路径的复制漂移）。 */
+const PERSISTENCE_CORRUPT_NEW = PERSISTENCE_CORRUPT_V1.replace(
+  PERSISTENCE_CORRUPT_WARN_V1,
+  () => PERSISTENCE_CORRUPT_DEDUPE_BLOCK,
+);
 
 function transformPersistenceCorruptGuard(src, file) {
-  if (src.includes(PERSISTENCE_CORRUPT_MARKER)) return { status: 'already' };
+  if (src.includes(PERSISTENCE_CORRUPT_MARKER)) {
+    // 在野 v1（尚无去重）就地升级：裸告警行换成同一份去重块 ⇒ 与全新应用逐字节相同。
+    // 有 v2 标记时该分支不可达，故 5-tab 串是 6-tab 行子串这一点不会造成误替换。
+    if (!src.includes(PERSISTENCE_CORRUPT_DEDUPE_MARKER) && src.includes(PERSISTENCE_CORRUPT_WARN_V1)) {
+      return { status: 'changed', src: src.replace(PERSISTENCE_CORRUPT_WARN_V1, () => PERSISTENCE_CORRUPT_DEDUPE_BLOCK) };
+    }
+    return { status: 'already' };
+  }
   if (!src.includes(PERSISTENCE_CORRUPT_OLD)) {
     return {
       status: 'anchor-missing',
@@ -508,6 +539,9 @@ module.exports = {
   PERSISTENCE_COMPLETE_CHECK_NEW,
   transformPersistenceTornTail,
   PERSISTENCE_CORRUPT_MARKER,
+  PERSISTENCE_CORRUPT_DEDUPE_MARKER,
+  PERSISTENCE_CORRUPT_WARN_V1,
+  PERSISTENCE_CORRUPT_V1,
   PERSISTENCE_CORRUPT_OLD,
   PERSISTENCE_CORRUPT_NEW,
   transformPersistenceCorruptGuard,

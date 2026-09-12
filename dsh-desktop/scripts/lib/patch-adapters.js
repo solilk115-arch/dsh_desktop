@@ -42,6 +42,7 @@ const {
   PERSISTENCE_COMPLETE_CHECK_NEW,
   PERSISTENCE_CORRUPT_OLD,
   PERSISTENCE_CORRUPT_NEW,
+  PERSISTENCE_CORRUPT_V1,
 } = require('./runtime-patches');
 
 // journal-stream 历史续读补丁（BUG1：不连续历史页断头锁死 hasMore）。
@@ -2371,7 +2372,10 @@ const PRISTINE_INJECTIONS = {
     [PERSISTENCE_COMPLETE_CHECK, PERSISTENCE_COMPLETE_CHECK_NEW],
   ],
   'persistence-corrupt-guard': [
+    // v2（含每进程去重）与 v1（裸告警，在野副本）两形态都登记，剥离时按存在者命中
+    // ——只登记 v2 的话，v1 副本剥不掉 marker，drift-sentinel 的 changed 断言会假红。
     [PERSISTENCE_CORRUPT_OLD, PERSISTENCE_CORRUPT_NEW],
+    [PERSISTENCE_CORRUPT_OLD, PERSISTENCE_CORRUPT_V1],
   ],
   'session-header-scan-guard': [
     // 改写型对（NEW 比 OLD 短）与三处追加型注入同列；顺序：先复原调用点，
