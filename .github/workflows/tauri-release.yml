@@ -332,6 +332,7 @@ jobs:
   # 实验性：payload 中 sharp 等原生模块仍为 x64 prebuild，ARM64 设备上靠
   # Windows 11 x64 模拟（Prism）或自愈链兜底，故 continue-on-error。
   build-windows-arm64:
+    if: false  # dual-track: 本机只需 Windows x64，短路省 CI 分钟
     name: Windows ARM64 (NSIS, experimental)
     runs-on: windows-latest
     timeout-minutes: 90
@@ -807,6 +808,7 @@ jobs:
           if-no-files-found: error
 
   build-linux:
+    if: false  # dual-track: 本机只需 Windows x64，短路省 CI 分钟
     name: Linux x64 (AppImage + deb)
     runs-on: ubuntu-22.04
     timeout-minutes: 75
@@ -994,6 +996,7 @@ jobs:
           if-no-files-found: warn
 
   build-macos:
+    if: false  # dual-track: 本机只需 Windows x64，短路省 CI 分钟
     name: macOS ARM64 (dmg)
     runs-on: macos-14
     timeout-minutes: 75
@@ -1475,7 +1478,7 @@ jobs:
   mirror-gitee:
     name: Mirror Release to Gitee
     needs: [publish]
-    if: always() && !cancelled() && needs.publish.result == 'success'
+    if: false  # dual-track: 本机只需 Windows x64，短路省 CI 分钟
     runs-on: ubuntu-latest
     timeout-minutes: 75
     env:
