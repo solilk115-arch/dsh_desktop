@@ -50,7 +50,11 @@ const INJECT = [
   '                        const _model = globalThis.__dsh4xxLastModel || model;',
   '                        const _msg = Array.isArray(_params && _params.messages) ? _params.messages.map((m) => ({ role: m.role, content: typeof m.content === "string" ? m.content.slice(0, 2000) : "[parts] " + JSON.stringify(m.content).slice(0, 2000) })) : undefined;',
   '                        const _entry = { time: new Date().toISOString(), status: _st, provider: _model && _model.provider && _model.provider.name, model: _model && _model.id, baseUrl: _model && _model.baseUrl, params: _params === undefined ? undefined : { ..._params, messages: _msg }, error: String(error && error.message || error).slice(0, 500) };',
-  '                        __dsh4xxFs.appendFileSync(__dsh4xxPath.join(_dumpDir, "llm-4xx-dump.log"), JSON.stringify(_entry) + "\\n");',
+  '                        // dsh-desktop patch (pi-ai 4xx request dump cap v1): 无封顶会无限增长',
+  '                        //（实测 +172.9MB/3h）——append 前超 64MB 轮转一代 .old，绝不影响控制流。',
+  '                        const _dumpFile = __dsh4xxPath.join(_dumpDir, "llm-4xx-dump.log");',
+  '                        try { if (__dsh4xxFs.statSync(_dumpFile).size > 67108864) { try { __dsh4xxFs.renameSync(_dumpFile, _dumpFile + ".old"); } catch {} } } catch {}',
+  '                        __dsh4xxFs.appendFileSync(_dumpFile, JSON.stringify(_entry) + "\\n");',
   '                    }',
   '                }',
   '            } catch {}',
@@ -78,6 +82,18 @@ const DUMPDIR_V1 = 'const _dumpDir = process.env.DSH_LLM_DUMP_DIR || process.env
 /** v2：兜底 homedir()/.dsh。 */
 const DUMPDIR_V2 = 'const _dumpDir = process.env.DSH_LLM_DUMP_DIR || process.env.DSH_HOME || __dsh4xxPath.join(__dsh4xxHome(), ".dsh");';
 
+/** cap v1 幂等标记：dump 封顶（防无限增长，实测 +172.9MB/3h）。 */
+const CAP_MARKER = 'pi-ai 4xx request dump cap v1';
+/** 无封顶 append 行（老注入体，升级就地替换）；含 24 空格缩进以保替换后格式。 */
+const APPEND_UNCAPPED = '                        __dsh4xxFs.appendFileSync(__dsh4xxPath.join(_dumpDir, "llm-4xx-dump.log"), JSON.stringify(_entry) + "\\n");';
+/** 带 64MB 轮转的 append 块（cap v1）。 */
+const APPEND_CAPPED = [
+  '                        // ' + CAP_MARKER + ': 无封顶会无限增长（实测 +172.9MB/3h），append 前超 64MB 轮转一代 .old。',
+  '                        const _dumpFile = __dsh4xxPath.join(_dumpDir, "llm-4xx-dump.log");',
+  '                        try { if (__dsh4xxFs.statSync(_dumpFile).size > 67108864) { try { __dsh4xxFs.renameSync(_dumpFile, _dumpFile + ".old"); } catch {} } } catch {}',
+  '                        __dsh4xxFs.appendFileSync(_dumpFile, JSON.stringify(_entry) + "\\n");',
+].join('\n');
+
 /**
  * transform：幂等、锚点失配不改写。
  * @param {string} src
@@ -87,7 +103,13 @@ const DUMPDIR_V2 = 'const _dumpDir = process.env.DSH_LLM_DUMP_DIR || process.env
 function transform4xxDump(src, file) {
   if (src.includes(MARKER)) {
     // v2 已在位则幂等；v1（env 缺失即静默跳过）就地升级：dumpDir 行 + os import。
-    if (src.includes(DUMPDIR_V2)) return { status: 'already' };
+    if (src.includes(DUMPDIR_V2)) {
+      // cap v1：老注入体的无封顶 append 行就地替换（防 dump 无限增长）。
+      if (src.includes(APPEND_UNCAPPED)) {
+        return { status: 'changed', src: src.replace(APPEND_UNCAPPED, () => APPEND_CAPPED) };
+      }
+      return { status: 'already' };
+    }
     if (src.includes(DUMPDIR_V1)) {
       let out = src.replace(DUMPDIR_V1, DUMPDIR_V2);
       if (out.includes(IMPORT_V1)) out = out.replace(IMPORT_V1, IMPORT_INJECT);
@@ -147,7 +169,7 @@ function patchPiAi4xxDump(nmRoot, log = () => {}, stats) {
   return 0;
 }
 
-module.exports = { patchPiAi4xxDump, transform4xxDump, MARKER, TARGET_REL };
+module.exports = { patchPiAi4xxDump, transform4xxDump, MARKER, CAP_MARKER, APPEND_UNCAPPED, APPEND_CAPPED, TARGET_REL };
 
 if (require.main === module) {
   const root = process.argv[2] ? path.resolve(process.argv[2]) : path.resolve(__dirname, '..', 'node_modules');

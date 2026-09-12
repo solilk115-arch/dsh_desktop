@@ -195,6 +195,10 @@ function transformPersistenceTornTail(src, file) {
 // 时跳过该会话并告警，而不是让整个 plugin tree 初始化崩溃（2026-08 事故：
 // 卷影恢复带回零填充头部的会话日志，导致应用整体无法启动）。
 const PERSISTENCE_CORRUPT_MARKER = 'dsh-desktop-corrupt-guard-v1';
+/** v2：同一损坏文件每轮扫描重复告警的每进程去重（防日志洪泛毁崩溃现场）。 */
+const PERSISTENCE_CORRUPT_DEDUPE_MARKER = 'dsh-desktop-corrupt-guard-v2';
+/** v1 注入体的裸告警行（升级就地替换为去重版）。 */
+const PERSISTENCE_CORRUPT_WARN_OLD = '\t\t\t\t\tconsole.warn(`[dsh-session-persistence] skipping corrupt session log: ${path} (${corruptError?.message ?? corruptError})`);';
 const PERSISTENCE_CORRUPT_OLD =
   'const first = this.compression === "zstd" ? await this.readFirstZstdLine(path, signal) : await this.readFirstLine(path, signal);';
 const PERSISTENCE_CORRUPT_NEW = [
@@ -204,13 +208,33 @@ const PERSISTENCE_CORRUPT_NEW = [
   '\t\t\t\t\tfirst = this.compression === "zstd" ? await this.readFirstZstdLine(path, signal) : await this.readFirstLine(path, signal);',
   '\t\t\t\t} catch (corruptError) {',
   '\t\t\t\t\tsignal?.throwIfAborted();',
-  '\t\t\t\t\tconsole.warn(`[dsh-session-persistence] skipping corrupt session log: ${path} (${corruptError?.message ?? corruptError})`);',
+  '\t\t\t\t\t// ' + PERSISTENCE_CORRUPT_DEDUPE_MARKER + ': list()/listArtifacts() 每 ~3s 重扫会对同一损坏',
+  '\t\t\t\t\t// 文件重复告警（实测占 .old 98.4% 行、每小时轮掉 desktop.log、毁崩溃现场）——每进程每路径只告警一次。',
+  '\t\t\t\t\tif (!globalThis.__dshCorruptWarnSeen) globalThis.__dshCorruptWarnSeen = new Set();',
+  '\t\t\t\t\tif (!globalThis.__dshCorruptWarnSeen.has(path)) {',
+  '\t\t\t\t\t\tglobalThis.__dshCorruptWarnSeen.add(path);',
+  '\t\t\t\t\t\tconsole.warn(`[dsh-session-persistence] skipping corrupt session log: ${path} (${corruptError?.message ?? corruptError})`);',
+  '\t\t\t\t\t}',
   '\t\t\t\t\tcontinue;',
   '\t\t\t\t}',
 ].join('\n');
 
 function transformPersistenceCorruptGuard(src, file) {
-  if (src.includes(PERSISTENCE_CORRUPT_MARKER)) return { status: 'already' };
+  if (src.includes(PERSISTENCE_CORRUPT_MARKER)) {
+    // v1 已在位：若还是裸告警行（无 v2 去重），就地升级。
+    if (!src.includes(PERSISTENCE_CORRUPT_DEDUPE_MARKER) && src.includes(PERSISTENCE_CORRUPT_WARN_OLD)) {
+      const deduped = [
+        '\t\t\t\t\t// ' + PERSISTENCE_CORRUPT_DEDUPE_MARKER + ': 重复告警每进程每路径只报一次。',
+        '\t\t\t\t\tif (!globalThis.__dshCorruptWarnSeen) globalThis.__dshCorruptWarnSeen = new Set();',
+        '\t\t\t\t\tif (!globalThis.__dshCorruptWarnSeen.has(path)) {',
+        '\t\t\t\t\t\tglobalThis.__dshCorruptWarnSeen.add(path);',
+        PERSISTENCE_CORRUPT_WARN_OLD,
+        '\t\t\t\t\t}',
+      ].join('\n');
+      return { status: 'changed', src: src.replace(PERSISTENCE_CORRUPT_WARN_OLD, () => deduped) };
+    }
+    return { status: 'already' };
+  }
   if (!src.includes(PERSISTENCE_CORRUPT_OLD)) {
     return {
       status: 'anchor-missing',
@@ -508,6 +532,8 @@ module.exports = {
   PERSISTENCE_COMPLETE_CHECK_NEW,
   transformPersistenceTornTail,
   PERSISTENCE_CORRUPT_MARKER,
+  PERSISTENCE_CORRUPT_DEDUPE_MARKER,
+  PERSISTENCE_CORRUPT_WARN_OLD,
   PERSISTENCE_CORRUPT_OLD,
   PERSISTENCE_CORRUPT_NEW,
   transformPersistenceCorruptGuard,
