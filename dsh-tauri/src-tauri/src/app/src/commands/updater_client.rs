@@ -171,9 +171,9 @@ impl From<UpdaterError> for bridge::BridgeError {
 // ---------------------------------------------------------------------------
 
 /// GitHub API（免 token，60 请求/h；v0.5.2 实测形状：tag_name + assets[].{name,browser_download_url,size,digest}）。
-const GITHUB_LATEST: &str = "https://api.github.com/repos/myYangyunfan/dsh_desktop/releases/latest";
+const GITHUB_LATEST: &str = "https://api.github.com/repos/solilk115-arch/dsh_desktop/releases/latest";
 /// Gitee API v5（资产仅 {name,browser_download_url}，无 size；100MB/文件限）。
-const GITEE_LATEST: &str = "https://gitee.com/api/v5/repos/my-yang-yunfan/dsh_desktop/releases/latest";
+const GITEE_LATEST: &str = "https://gitee.com/api/v5/repos/solilk115-arch/dsh_desktop/releases/latest";
 /// 单源元数据超时（探测与边车查询共用；spec：8s/源）。
 const META_TIMEOUT: Duration = Duration::from_secs(8);
 /// 下载：无总超时（大文件），连接 10s + 单次读 60s（静默死链防护）。
@@ -267,7 +267,7 @@ fn cached_alt_url(name: &str) -> Option<String> {
 /// GitHub 自家源无锚时维持 size/50MB 下限（同源信任 = GitHub HTTPS）。
 static CROSS_ANCHOR_URL_CACHE: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
 
-const GITHUB_REPO_PATH: &str = "myYangyunfan/dsh_desktop";
+const GITHUB_REPO_PATH: &str = "solilk115-arch/dsh_desktop";
 
 fn github_sidecar_url(tag: &str, name: &str) -> String {
     format!("https://github.com/{GITHUB_REPO_PATH}/releases/download/{tag}/{name}.sha256")

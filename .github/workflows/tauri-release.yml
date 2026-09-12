@@ -1401,7 +1401,7 @@ jobs:
           # publish job 无 checkout（无 git 上下文）——gh 必须显式知道仓库，
           # 否则 create 走「从本地 git 推断」路径直接 fatal（v0.5.1 第三跑
           # 实证：六资产校验全过、create 崩在 not a git repository）。
-          GH_REPO: myYangyunfan/dsh_desktop
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           TAG='${{ steps.ver.outputs.tag }}'
@@ -1428,7 +1428,7 @@ jobs:
         # 大小与本地一致且非零。另列出 release 全部资产供人工核对重复。
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: myYangyunfan/dsh_desktop
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           TAG='${{ steps.ver.outputs.tag }}'
@@ -1482,7 +1482,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 75
     env:
-      GH_REPO: myYangyunfan/dsh_desktop
+      GH_REPO: ${{ github.repository }}
       GITEE_API: https://gitee.com/api/v5
       GITEE_REPO: my-yang-yunfan/dsh_desktop
       GITEE_FILE_LIMIT: '83886080'

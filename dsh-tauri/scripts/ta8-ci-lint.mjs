@@ -112,9 +112,9 @@ function buildChecks() {
     assert(t.includes('wc -c <'), '体积统计须用 wc -c（BSD stat 无 -c，全平台可移植）');
   });
 
-  C('GH-REPO', 'GH_REPO 注入存在（create/upload/verify/mirror ≥3 处）', ({ yaml }) => {
-    const n = (yaml.match(/GH_REPO: myYangyunfan\/dsh_desktop/g) || []).length;
-    assert(n >= 3, `GH_REPO 注入须 ≥3 处，实得 ${n}`);
+  C('GH-REPO', 'GH_REPO 动态注入存在（create/upload/verify/mirror ≥3 处）', ({ yaml }) => {
+    const n = (yaml.match(/GH_REPO: *\${{\s*github\.repository\s*}}/g) || []).length;
+    assert(n >= 3, `GH_REPO 须为 github.repository 注入且 ≥3 处，实得 ${n}`);
   });
 
   C('D3D-SRC', 'D3DCOMPILER①：源 DLL 在位 + 体积 + PE 检查（构建前）', ({ jobs }) => {
